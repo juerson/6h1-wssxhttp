@@ -1,0 +1,13 @@
+{
+	"name": "6h1-wssxhttp",
+	"version": "0.0.0",
+	"private": true,
+	"scripts": {
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"start": "wrangler dev"
+	},
+	"devDependencies": {
+		"wrangler": "^4.49.0"
+	}
+}

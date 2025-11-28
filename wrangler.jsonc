@@ -1,0 +1,7 @@
+{
+  "name": "6h1-wssxhttp",
+  "main": "src/worker.js",
+  "workers_dev": true,
+  "preview_urls": false,
+  "compatibility_date": "2025-11-17"
+}
