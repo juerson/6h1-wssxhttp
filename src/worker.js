@@ -831,7 +831,6 @@ class ProtocolRegistry {
 				try {
 					matched = proto.match(buf, config)
 				} catch (e) {
-					console.warn(`[${proto.name}] match failed: ${e.message}`)
 					continue
 				}
 				// 找到匹配的协议后交给它继续读取剩余内容

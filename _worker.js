@@ -822,7 +822,6 @@ var ProtocolRegistry = class {
         try {
           matched = proto.match(buf, config);
         } catch (e) {
-          console.warn(`[${proto.name}] match failed: ${e.message}`);
           continue;
         }
         if (matched) {
