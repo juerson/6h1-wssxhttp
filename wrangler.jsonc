@@ -1,7 +1,29 @@
 {
-  "name": "6h1-wssxhttp",
-  "main": "src/worker.js",
-  "workers_dev": true,
-  "preview_urls": false,
-  "compatibility_date": "2025-11-17"
+	"name": "6h1-wssxhttp-do",
+	"main": "src/worker.js",
+	"workers_dev": true,
+	"preview_urls": true,
+	"compatibility_date": "2025-11-09",
+	"migrations": [
+		{
+			"new_sqlite_classes": [
+				"DurableApp" // 必须与代码中 DurableObject 类的名字一致
+			],
+			"tag": "v1"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"class_name": "DurableApp", // 必须与代码中 DurableObject 类的名字一致
+				"name": "DURABLE_APP" // 给 env 里挂载的变量名，可以随意起，但推荐全大写下划线风格。在 Worker 中要通过 env.DURABLE_APP 来访问绑定
+			}
+		]
+	},
+	"vars": {
+		"V_UUID4": "8640655f-7920-437a-9b91-2ec452b74b03",
+		"USER_PROXY": "193.123.90.82:12648",
+		"WS_PATH": "/8640655f/ws",
+		"XHTTP_PATH": "/8640655f/xhttp"
+	}
 }

@@ -1,6 +1,6 @@
-# 6h1-wssxhttp
+# 6h1-wssxhttp（Durable Object）
 
-基于 Cloudflare Workers  的多协议 Serverless Tunnel。
+基于 Cloudflare Workers 的多协议 Serverless Tunnel。
 
 ### 一、支持协议
 
@@ -13,7 +13,17 @@
 
 <img src="images\1.png" title="v2rayN"/>
 
-注意：Shadowsocks协议，原则上使用**V_UUID4**值作为密码，实际它**无密码**的，输入**任意字符串都可以**，目前只靠**WS_PATH**或**XHTTP_PATH**的路径设置复杂或真实一点保护你的节点。
+注意：
+
+1、Shadowsocks协议，原则上使用**V_UUID4**值作为密码，实际它**无密码**的，输入**任意字符串都可以**，目前只靠**WS_PATH**或**XHTTP_PATH**的路径设置复杂或真实一点保护你的节点。
+
+2、问题：
+
+- xhttp协议出现”IoContext timed out due to inactivity, waitUntil tasks were cancelled without completing.“问题致使错误率不断增加没有解决，慎用。
+
+- 关于**Durable Object部署的位置**，使用优选的Cloudflare IP/域名地址，第一次连接成功，会自动部署到那个DO位置中，后期只要id不变就不能更改（长时间不使用，cloudflare自动销毁，重新创建DO对象除外，会重新部署到新的DO位置）。DO的服务器比较少的，打开下面的网站，自己琢磨清楚再选择。
+
+  https://where.durableobjects.live/
 
 ### 二、使用
 

@@ -1,3 +1,4 @@
+import { DurableObject } from "cloudflare:workers"
 import { connect } from 'cloudflare:sockets'
 
 class Config {
@@ -831,7 +832,6 @@ class ProtocolRegistry {
 				try {
 					matched = proto.match(buf, config)
 				} catch (e) {
-					console.warn(`[${proto.name}] match failed: ${e.message}`)
 					continue
 				}
 				// 找到匹配的协议后交给它继续读取剩余内容
@@ -936,6 +936,8 @@ class ClientProcessor {
 			const vls = await this.protocolRegistry.parseHeader(this.config, client)
 			// 建立远端 TCP 连接
 			const remote = await this.connectionManager.connect(vls.hostname, vls.port)
+			// 监控 AbortSignal（如果客户端关闭则销毁远端）
+			this.connectionManager.monitorAbortSignal(client.signal, remote)
 			// 数据转发（pipe / yield）
 			const relay = new DataRelay(this.config, this.logger, client.signal)
 			if (ctx && typeof ctx.waitUntil === 'function') {
@@ -943,8 +945,6 @@ class ClientProcessor {
 			} else {
 				await relay.relay(client, remote, vls)
 			}
-			// 监控 AbortSignal（如果客户端关闭则销毁远端）
-			this.connectionManager.monitorAbortSignal(client.signal, remote)
 			return true
 		} catch (e) {
 			this.logger.error(`handle client error: ${e.message}`)
@@ -956,8 +956,9 @@ class ClientProcessor {
 	}
 }
 
-class AppWorker {
-	constructor(env) {
+export class DurableApp extends DurableObject {
+	constructor(ctx, env) {
+		super(ctx, env)
 		this.config = new Config(env)
 		this.logger = new Logger(this.config.LOG_LEVEL, this.config['TIME_ZONE'])
 		this.clientProcessor = new ClientProcessor(this.config, this.logger)
@@ -966,69 +967,83 @@ class AppWorker {
 		this.BAD_REQUEST = new Response(null, { status: 400, statusText: 'BAD_REQUEST' })
 	}
 
-	async handleWs(request) {
-		this.logger.debug('accept ws client')
-		let [client, server] = Object.values(new WebSocketPair())
-		server.accept()
-		const wsClient = new WebSocketClient(this.logger, this.config.BUFFER_SIZE, client, server)
-		try {
-			this.clientProcessor.process(wsClient)
-			return wsClient.resp
-		} catch (err) {
-			this.logger.error(`accept ws client error: ${err.message}`)
-			wsClient.close && wsClient.close()
-			return this.BAD_REQUEST
-		}
-	}
+	async fetch(request) {
+		const upgrade = request.headers.get('Upgrade')
 
-	async handleXhttp(request, ctx) {
-		this.logger.debug('accept xhttp client')
-		const body = request.body
-		if (!body) {
-			this.logger.error('xhttp request has no body')
-			return this.BAD_REQUEST
+		// WebSocket 请求
+		if (upgrade === 'websocket') {
+			this.logger.debug('accept ws client')
+			let [client, server] = Object.values(new WebSocketPair())
+			server.accept()
+			const wsClient = new WebSocketClient(this.logger, this.config.BUFFER_SIZE, client, server)
+			try {
+				this.clientProcessor.process(wsClient, this.ctx)
+				return wsClient.resp
+			} catch (err) {
+				this.logger.error(`accept ws client error: ${err.message}`)
+				wsClient.close && wsClient.close()
+				return this.BAD_REQUEST
+			}
 		}
-		const client = new XhttpClient(this.config, this.config.BUFFER_SIZE, body)
-		const ok = await this.clientProcessor.process(client, ctx)
-		return ok ? client.resp : this.BAD_REQUEST
-	}
 
-	async handleGet(request, url, pathname) {
-		if (this.config.IP_QUERY_PATH && url.pathname.endsWith(this.config.IP_QUERY_PATH)) {
-			const info = this.ipInfoProvider.getInfo(request);
-			return new Response(JSON.stringify(info), {
-				headers: { 'content-type': 'application/json;charset=UTF-8' },
-			});
+		// XHTTP 请求
+		if (request.method === 'POST' && request.body) {
+			this.logger.debug('accept xhttp client')
+			this.logger.info(`XHTTP: Processing POST request with body`)
+			const client = new XhttpClient(this.config, this.config.BUFFER_SIZE, request.body)
+			try {
+				const ok = await this.clientProcessor.process(client, this.ctx)
+				return ok ? client.resp : this.BAD_REQUEST
+			} catch (err) {
+				this.logger.error(`accept xhttp client error: ${err.message}`)
+				return this.BAD_REQUEST
+			}
 		}
-		const links = this.linkGenerator.generate(url, pathname);
-		if (links) {
-			return new Response(links, {
-				headers: { 'content-type': 'text/plain;charset=UTF-8' },
-			});
-		}
-		return new Response('Hello World!');
-	}
 
-	async fetch(request, ctx) {
-		const url = new URL(request.url);
-		const p = this.config.normalizePath(url.pathname);
-		const upgrade = request.headers.get('Upgrade');
-		if (upgrade === 'websocket' && p === this.config.WS_PATH) {
-			return await this.handleWs(request);
-		}
-		if (request.method === 'POST' && p === this.config.XHTTP_PATH) {
-			return await this.handleXhttp(request, ctx);
-		}
-		if (request.method === 'GET' && !upgrade) {
-			return this.handleGet(request, url, p);
-		}
-		return this.BAD_REQUEST;
+		return this.BAD_REQUEST
 	}
+}
+
+async function handleGet(request, config, linkGenerator, ipInfoProvider) {
+	const url = new URL(request.url)
+	const pathname = config.normalizePath(url.pathname)
+	if (config.IP_QUERY_PATH && url.pathname.endsWith(config.IP_QUERY_PATH)) {
+		const info = ipInfoProvider.getInfo(request)
+		return new Response(JSON.stringify(info), {
+			headers: { 'content-type': 'application/json;charset=UTF-8' },
+		})
+	}
+	const links = linkGenerator.generate(url, pathname)
+	if (links) {
+		return new Response(links, {
+			headers: { 'content-type': 'text/plain;charset=UTF-8' },
+		})
+	}
+	return new Response('Hello World!')
 }
 
 export default {
 	async fetch(request, env, ctx) {
-		const worker = new AppWorker(env)
-		return await worker.fetch(request, ctx)
-	}
+		const config = new Config(env)
+		const url = new URL(request.url)
+		const pathname = config.normalizePath(url.pathname)
+		const upgrade = request.headers.get('Upgrade')
+
+		// GET 请求：显示信息或生成链接
+		if (request.method === 'GET' && !upgrade) {
+			const linkGenerator = new LinkGenerator(config)
+			const ipInfoProvider = new IPInfoProvider()
+			return handleGet(request, config, linkGenerator, ipInfoProvider)
+		}
+
+		// WebSocket 或 XHTTP 请求：都路由到 Durable Object
+		if ((upgrade === 'websocket' && pathname === config.WS_PATH) || (request.method === 'POST' && pathname === config.XHTTP_PATH)) {
+			const id = env.DURABLE_APP.idFromName(pathname)
+			const stub = env.DURABLE_APP.get(id)
+			return stub.fetch(request)
+		}
+
+		// 其他情况返回 400
+		return new Response(null, { status: 400, statusText: 'BAD_REQUEST' })
+	},
 }
